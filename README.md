@@ -1,7 +1,5 @@
 ## kannon.go is the official GoLang client library for Kannon Email Sender
 
-#### Usage
-
 Instantiate kannon cli
 
 ```go
@@ -18,7 +16,7 @@ k := kannon.NewKannon(
   )
 ```
 
-### Basic Usage
+### Basic Usage
 
 ```go
   html := `...`;
