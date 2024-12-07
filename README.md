@@ -4,54 +4,56 @@ Instantiate kannon cli
 
 ```go
 sender := kannon.Sender{
-		Email: "sender@kannon.dev",
-		Alias: "Kannon",
-	}
+  Email: "sender@kannon.dev",
+  Alias: "Kannon",
+}
 
 k := kannon.NewKannon(
-    "<YOUR DONMAIN>",
-    "<API KEY>",
-    sender,
-   "<YOU KANNON API HOST>",
-  )
+  "<YOUR DONMAIN>",
+  "<API KEY>",
+  sender,
+  "<YOU KANNON API HOST>",
+)
 ```
 
 ### Basic Usage
 
 ```go
-  html := `...`;
+html := `...`;
 
-  recipents := []kannon.Recipient{
-		{
-			Email: "test@email.com",
-			Fields: map[string]string{
-				"name": "Test",
+recipents := []kannon.Recipient{
+  {
+    Email: "test@email.com",
+    Fields: map[string]string{
+      "name": "Test",
     },
-  }
+  },
+}
 
-  res, err := k.SendEmail(
-    recipents,
-    "This is an email from kannon.js",
-    html
-  );
+res, err := k.SendEmail(
+  recipents,
+  "This is an email from kannon.js",
+  html,
+);
 ```
 
 ### Sending Templates
 
 ```go
-  templateID := `...`;
+templateID := `...`;
 
-  recipents := []kannon.Recipient{
-		{
-			Email: "test@email.com",
-			Fields: map[string]string{
-				"name": "Test",
+recipents := []kannon.Recipient{
+  {
+    Email: "test@email.com",
+    Fields: map[string]string{
+      "name": "Test",
     },
-  }
+  },
+}
 
-  res, err := k.SendTemplate(
-    recipents,
-    "This is an email from kannon.js",
-    templateID
-  );
+res, err := k.SendTemplate(
+  recipents,
+  "This is an email from kannon.js",
+  templateID,
+);
 ```
