@@ -24,7 +24,7 @@ html := `...`;
 recipents := []kannon.Recipient{
   {
     Email: "test@email.com",
-    Fields: map[string]string{
+    Fields: kannon.Fields{
       "name": "Test",
     },
   },
@@ -45,7 +45,7 @@ templateID := `...`;
 recipents := []kannon.Recipient{
   {
     Email: "test@email.com",
-    Fields: map[string]string{
+    Fields: kannon.Fields{
       "name": "Test",
     },
   },
