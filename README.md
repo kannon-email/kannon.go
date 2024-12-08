@@ -9,7 +9,7 @@ sender := kannon.Sender{
 }
 
 k := kannon.NewKannon(
-  "<YOUR DONMAIN>",
+  "<YOUR DOMAIN>",
   "<API KEY>",
   sender,
   "<YOU KANNON API HOST>",
@@ -32,7 +32,7 @@ recipents := []kannon.Recipient{
 
 res, err := k.SendEmail(
   recipents,
-  "This is an email from kannon.js",
+  "This is an email from kannon.go",
   html,
 );
 ```
@@ -53,7 +53,7 @@ recipents := []kannon.Recipient{
 
 res, err := k.SendTemplate(
   recipents,
-  "This is an email from kannon.js",
+  "This is an email from kannon.go",
   templateID,
 );
 ```
