@@ -17,8 +17,7 @@ k := kannon.NewKannon(
 ```
 
 > [!NOTE]
-> Remember to add `https://` to the api host (e.g. `https://grpc.kannon.email:443`)!
-
+> Remember to add `https://` to the API host (e.g. `https://grpc.kannon.email:443`)!
 ### Basic Usage
 
 ```go
