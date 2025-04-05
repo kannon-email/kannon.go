@@ -16,6 +16,8 @@ k := kannon.NewKannon(
 )
 ```
 
+> [!NOTE]
+> Remember to add `https://` to the API host (e.g. `https://grpc.kannon.email:443`)!
 ### Basic Usage
 
 ```go
@@ -31,6 +33,7 @@ recipents := []kannon.Recipient{
 }
 
 res, err := k.SendEmail(
+  context.Background(),
   recipents,
   "This is an email from kannon.go",
   html,
@@ -52,6 +55,7 @@ recipents := []kannon.Recipient{
 }
 
 res, err := k.SendTemplate(
+  context.Background(),
   recipents,
   "This is an email from kannon.go",
   templateID,
