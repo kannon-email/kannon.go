@@ -39,13 +39,6 @@ const (
 	MailerSendTemplateProcedure = "/pkg.kannon.mailer.apiv1.Mailer/SendTemplate"
 )
 
-// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
-var (
-	mailerServiceDescriptor            = apiv1.File_kannon_mailer_apiv1_mailerapiv1_proto.Services().ByName("Mailer")
-	mailerSendHTMLMethodDescriptor     = mailerServiceDescriptor.Methods().ByName("SendHTML")
-	mailerSendTemplateMethodDescriptor = mailerServiceDescriptor.Methods().ByName("SendTemplate")
-)
-
 // MailerClient is a client for the pkg.kannon.mailer.apiv1.Mailer service.
 type MailerClient interface {
 	SendHTML(context.Context, *connect.Request[apiv1.SendHTMLReq]) (*connect.Response[apiv1.SendRes], error)
@@ -61,17 +54,18 @@ type MailerClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewMailerClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) MailerClient {
 	baseURL = strings.TrimRight(baseURL, "/")
+	mailerMethods := apiv1.File_kannon_mailer_apiv1_mailerapiv1_proto.Services().ByName("Mailer").Methods()
 	return &mailerClient{
 		sendHTML: connect.NewClient[apiv1.SendHTMLReq, apiv1.SendRes](
 			httpClient,
 			baseURL+MailerSendHTMLProcedure,
-			connect.WithSchema(mailerSendHTMLMethodDescriptor),
+			connect.WithSchema(mailerMethods.ByName("SendHTML")),
 			connect.WithClientOptions(opts...),
 		),
 		sendTemplate: connect.NewClient[apiv1.SendTemplateReq, apiv1.SendRes](
 			httpClient,
 			baseURL+MailerSendTemplateProcedure,
-			connect.WithSchema(mailerSendTemplateMethodDescriptor),
+			connect.WithSchema(mailerMethods.ByName("SendTemplate")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -105,16 +99,17 @@ type MailerHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewMailerHandler(svc MailerHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	mailerMethods := apiv1.File_kannon_mailer_apiv1_mailerapiv1_proto.Services().ByName("Mailer").Methods()
 	mailerSendHTMLHandler := connect.NewUnaryHandler(
 		MailerSendHTMLProcedure,
 		svc.SendHTML,
-		connect.WithSchema(mailerSendHTMLMethodDescriptor),
+		connect.WithSchema(mailerMethods.ByName("SendHTML")),
 		connect.WithHandlerOptions(opts...),
 	)
 	mailerSendTemplateHandler := connect.NewUnaryHandler(
 		MailerSendTemplateProcedure,
 		svc.SendTemplate,
-		connect.WithSchema(mailerSendTemplateMethodDescriptor),
+		connect.WithSchema(mailerMethods.ByName("SendTemplate")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/pkg.kannon.mailer.apiv1.Mailer/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
