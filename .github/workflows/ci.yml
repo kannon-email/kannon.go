@@ -44,7 +44,7 @@ jobs:
         with:
           lint: true
           format: false
-          breaking: false
+          breaking: ${{ github.event_name == 'pull_request' }}
           push: false
           archive: false
           pr_comment: false
