@@ -1,4 +1,4 @@
 [tools]
 go = "1.26.5"
 buf = "1.72.0"
-protoc-gen-go = "1.36.11"
+golangci-lint = "2.12.2"
