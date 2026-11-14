@@ -1,231 +1,156 @@
+// Package kannon is the official Go client for Kannon, the cloud-native
+// email sender. It sends through the Kannon REST API v1.
 package kannon
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
-
-	"connectrpc.com/connect"
-	"github.com/kannon-email/kannon.go/internal/proto/kannon/mailer/apiv1"
-	k "github.com/kannon-email/kannon.go/internal/proto/kannon/mailer/apiv1/apiv1connect"
-	"github.com/kannon-email/kannon.go/internal/proto/kannon/mailer/types"
-	trackingtypes "github.com/kannon-email/kannon.go/internal/proto/kannon/tracking/types"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// DefaultBaseURL is the REST API v1 of the hosted Kannon at kannon.email.
+const DefaultBaseURL = "https://api.kannon.email/v1"
+
+// maxResponseBytes bounds how much of a response body is read, so a
+// misbehaving proxy cannot exhaust memory.
+const maxResponseBytes = 1 << 20
+
+// Kannon sends emails for one Domain with one API Key.
 type Kannon struct {
-	domain string
-	key    string
-
-	sender Sender
-
-	cli k.MailerClient
+	domain     string
+	key        string
+	sender     Sender
+	baseURL    string
+	httpClient *http.Client
 }
 
-func NewKannon(domain, key string, sender Sender, host string) *Kannon {
-	cli := k.NewMailerClient(http.DefaultClient, host, connect.WithGRPC())
+// ClientOption customizes a Kannon client.
+type ClientOption func(*Kannon)
 
-	return &Kannon{
-		domain: domain,
-		key:    key,
-
-		sender: sender,
-		cli:    cli,
+// WithBaseURL points the client at a Kannon REST API other than the hosted
+// one, including the version prefix (for example "https://kannon.example.com/v1").
+func WithBaseURL(baseURL string) ClientOption {
+	return func(k *Kannon) {
+		k.baseURL = baseURL
 	}
+}
+
+// WithHTTPClient sets the HTTP client used for every request. It defaults to
+// http.DefaultClient.
+func WithHTTPClient(client *http.Client) ClientOption {
+	return func(k *Kannon) {
+		k.httpClient = client
+	}
+}
+
+// NewKannon creates a client that sends as sender on domain, authenticated by
+// the Domain API Key key.
+func NewKannon(domain, key string, sender Sender, opts ...ClientOption) *Kannon {
+	k := &Kannon{
+		domain:     domain,
+		key:        key,
+		sender:     sender,
+		baseURL:    DefaultBaseURL,
+		httpClient: http.DefaultClient,
+	}
+	for _, opt := range opts {
+		opt(k)
+	}
+	k.baseURL = strings.TrimRight(k.baseURL, "/")
+	return k
 }
 
 // SendEmail sends an HTML email to the given recipients. The send can be
 // customized with SendOption values such as WithTracking, WithHeaders or
 // WithScheduledTime.
 func (k *Kannon) SendEmail(ctx context.Context, to []Recipient, subject, body string, opts ...SendOption) (MessageResult, error) {
-	common := k.buildSendRequest(to, subject, opts)
-
-	req := connect.NewRequest(&apiv1.SendHTMLReq{
-		Sender:              common.sender,
-		Subject:             common.subject,
-		Html:                body,
-		Recipients:          common.recipients,
-		Attachments:         common.attachments,
-		GlobalFields:        common.globalFields,
-		Headers:             common.headers,
-		OneClickUnsubscribe: common.oneClickUnsubscribe,
-		ScheduledTime:       common.scheduledTime,
-		Tracking:            common.tracking,
-	})
-
-	req.Header().Set("Authorization", k.getAuthHeader())
-
-	res, err := k.cli.SendHTML(ctx, req)
-	if err != nil {
-		return MessageResult{}, err
-	}
-
-	return parseResult(res.Msg), nil
+	return k.createBatch(ctx, to, subject, wireContent{Type: "html", HTML: body}, opts)
 }
 
 // SendTemplate sends a template email to the given recipients. The send can
 // be customized with SendOption values such as WithTracking, WithHeaders or
 // WithScheduledTime.
 func (k *Kannon) SendTemplate(ctx context.Context, to []Recipient, subject, templateID string, opts ...SendOption) (MessageResult, error) {
-	common := k.buildSendRequest(to, subject, opts)
-
-	req := connect.NewRequest(&apiv1.SendTemplateReq{
-		Sender:              common.sender,
-		Subject:             common.subject,
-		TemplateId:          templateID,
-		Recipients:          common.recipients,
-		Attachments:         common.attachments,
-		GlobalFields:        common.globalFields,
-		Headers:             common.headers,
-		OneClickUnsubscribe: common.oneClickUnsubscribe,
-		ScheduledTime:       common.scheduledTime,
-		Tracking:            common.tracking,
-	})
-
-	req.Header().Set("Authorization", k.getAuthHeader())
-
-	res, err := k.cli.SendTemplate(ctx, req)
-	if err != nil {
-		return MessageResult{}, err
-	}
-
-	return parseResult(res.Msg), nil
+	return k.createBatch(ctx, to, subject, wireContent{Type: "template", TemplateID: templateID}, opts)
 }
 
-// sendRequestFields carries the proto fields shared by SendHTMLReq and
-// SendTemplateReq, so both send methods build them the same way.
-type sendRequestFields struct {
-	sender              *types.Sender
-	subject             string
-	recipients          []*types.Recipient
-	attachments         []*apiv1.Attachment
-	globalFields        map[string]string
-	headers             *types.Headers
-	oneClickUnsubscribe *types.OneClickUnsubscribe
-	scheduledTime       *timestamppb.Timestamp
-	tracking            *trackingtypes.TrackingPolicy
-}
-
-// buildSendRequest builds the fields shared by SendHTMLReq and
-// SendTemplateReq. Optional messages are omitted (nil) when the matching
-// option is absent: in particular an absent scheduled time means "send now"
-// server-side.
-func (k *Kannon) buildSendRequest(to []Recipient, subject string, opts []SendOption) sendRequestFields {
+func (k *Kannon) createBatch(ctx context.Context, to []Recipient, subject string, content wireContent, opts []SendOption) (MessageResult, error) {
 	options := applySendOptions(opts)
 
-	fields := sendRequestFields{
-		sender:       k.sender.toProto(),
-		subject:      subject,
-		recipients:   mapRecipients(to),
-		attachments:  mapAttachments(options.attachments),
-		globalFields: options.globalFields,
-		tracking:     options.tracking.toProto(),
-	}
-
-	if fields.globalFields == nil {
-		fields.globalFields = map[string]string{}
-	}
-
-	if options.headers != nil {
-		fields.headers = &types.Headers{
-			To: emptyIfNil(options.headers.To),
-			Cc: emptyIfNil(options.headers.CC),
+	idempotencyKey := options.idempotencyKey
+	if idempotencyKey == "" {
+		var err error
+		if idempotencyKey, err = newIdempotencyKey(); err != nil {
+			return MessageResult{}, err
 		}
 	}
 
-	if options.oneClickUnsubscribe != nil {
-		fields.oneClickUnsubscribe = &types.OneClickUnsubscribe{
-			UrlTemplate: options.oneClickUnsubscribe.URLTemplate,
+	payload, err := json.Marshal(newWireBatch(k.sender, to, subject, content, options))
+	if err != nil {
+		return MessageResult{}, fmt.Errorf("kannon: encode batch: %w", err)
+	}
+
+	endpoint := k.baseURL + "/domains/" + url.PathEscape(k.domain) + "/batches"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return MessageResult{}, fmt.Errorf("kannon: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+k.key)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, application/problem+json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+
+	res, err := k.httpClient.Do(req)
+	if err != nil {
+		return MessageResult{}, fmt.Errorf("kannon: send batch: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
+	if err != nil {
+		return MessageResult{}, fmt.Errorf("kannon: read response: %w", err)
+	}
+
+	switch res.StatusCode {
+	case http.StatusCreated, http.StatusOK:
+		var created wireBatchCreated
+		if err := json.Unmarshal(body, &created); err != nil {
+			return MessageResult{}, fmt.Errorf("kannon: decode response: %w", err)
 		}
-	}
-
-	if options.scheduledTime != nil {
-		fields.scheduledTime = timestamppb.New(*options.scheduledTime)
-	}
-
-	return fields
-}
-
-func (k *Kannon) getAuthHeader() string {
-	token := base64.StdEncoding.EncodeToString([]byte(k.domain + ":" + k.key))
-	return "Basic " + token
-}
-
-func mapRecipients(recipients []Recipient) []*types.Recipient {
-	res := make([]*types.Recipient, 0, len(recipients))
-	for _, r := range recipients {
-		fields := r.Fields
-		if fields == nil {
-			fields = map[string]string{}
-		}
-		res = append(res, &types.Recipient{
-			Email:    r.Email,
-			Fields:   fields,
-			Tracking: r.Tracking.toProto(),
-		})
-	}
-	return res
-}
-
-func mapAttachments(attachments []Attachment) []*apiv1.Attachment {
-	res := make([]*apiv1.Attachment, 0, len(attachments))
-	for _, a := range attachments {
-		res = append(res, &apiv1.Attachment{
-			Filename: a.Filename,
-			Content:  a.Content,
-		})
-	}
-	return res
-}
-
-func emptyIfNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
-
-func parseResult(res *apiv1.SendRes) MessageResult {
-	scheduledTime := time.Now()
-	if res.ScheduledTime != nil {
-		scheduledTime = res.ScheduledTime.AsTime()
-	}
-
-	rejected := make([]RejectedRecipient, 0, len(res.RejectedRecipients))
-	for _, r := range res.RejectedRecipients {
-		rejected = append(rejected, RejectedRecipient{
-			Email:  r.Email,
-			Reason: RejectionReason(r.Reason),
-		})
-	}
-
-	return MessageResult{
-		MessageID:          res.MessageId,
-		TemplateID:         res.TemplateId,
-		ScheduledTime:      scheduledTime,
-		AcceptedCount:      int(res.AcceptedCount),
-		RejectedCount:      int(res.RejectedCount),
-		RejectedRecipients: rejected,
+		return created.toResult(to, res.StatusCode == http.StatusOK), nil
+	default:
+		return MessageResult{}, newAPIError(res, body)
 	}
 }
 
+// MessageResult is the intake receipt of a Batch.
 type MessageResult struct {
-	MessageID     string
-	TemplateID    string
+	// BatchID identifies the created Batch.
+	BatchID string
+	// ScheduledTime is when delivery starts: the creation time for a batch
+	// sent immediately.
 	ScheduledTime time.Time
 	// AcceptedCount is how many recipients were accepted and are queued for
 	// delivery.
 	AcceptedCount int
-	// RejectedCount is how many recipients were refused at intake. It equals
-	// the length of RejectedRecipients, and is zero for a send in which
-	// nothing was refused.
+	// RejectedCount is how many recipients were refused at intake.
 	RejectedCount int
 	// RejectedRecipients lists every recipient refused at intake, so you can
-	// reconcile what was actually queued without polling stats. A send in
-	// which every recipient is refused still succeeds, with AcceptedCount
-	// zero and every refusal listed.
+	// reconcile what was actually queued without polling stats. It is empty
+	// on a replay, whose RejectedCount still holds the original count.
+	//
+	// A send in which every recipient is refused does not create a Batch: it
+	// fails with an *APIError of code CodeNoRecipientsAccepted.
 	RejectedRecipients []RejectedRecipient
+	// Replayed reports that the idempotency key had already created this
+	// Batch, so no new Batch or Delivery was created.
+	Replayed bool
 }
 
 // RejectionReason is why a recipient was refused at intake.
@@ -239,6 +164,9 @@ const (
 	// RejectionReasonInvalidEmail means the address is empty or otherwise
 	// unusable.
 	RejectionReasonInvalidEmail RejectionReason = "invalid_email"
+	// RejectionReasonDuplicateRecipient means the address already appears
+	// earlier in the same batch.
+	RejectionReasonDuplicateRecipient RejectionReason = "duplicate_recipient"
 	// RejectionReasonTrackingAboveCeiling means the recipient's tracking
 	// policy asks for more than its domain allows; consent may narrow what is
 	// collected, never widen it.
@@ -251,29 +179,38 @@ const (
 	// leave a placeholder in the one-click unsubscribe URL template
 	// unresolved.
 	RejectionReasonUnsubscribeURLUnresolved RejectionReason = "unsubscribe_url_unresolved"
+	// RejectionReasonUnresolvedPlaceholder means the recipient's fields leave
+	// a placeholder in the subject or content unresolved.
+	RejectionReasonUnresolvedPlaceholder RejectionReason = "unresolved_placeholder"
+	// RejectionReasonReservedField means the recipient's fields override a
+	// reserved field, such as email.
+	RejectionReasonReservedField RejectionReason = "reserved_field"
+	// RejectionReasonMessageTooLarge means the personalised message for this
+	// recipient exceeds the size the server accepts.
+	RejectionReasonMessageTooLarge RejectionReason = "message_too_large"
 )
 
 // RejectedRecipient is one recipient refused at intake: no delivery was
 // created for it.
 type RejectedRecipient struct {
+	// Index is the zero-based position of the recipient in the request.
+	Index  int
 	Email  string
 	Reason RejectionReason
 }
 
+// Sender is the From of every email the client sends.
 type Sender struct {
 	Email string
+	// Alias is the display name shown beside Email.
 	Alias string
 }
 
-func (s Sender) toProto() *types.Sender {
-	return &types.Sender{
-		Email: s.Email,
-		Alias: s.Alias,
-	}
-}
-
 type Recipient struct {
-	Email  string
+	Email string
+	// Fields personalise the subject and content for this recipient. email
+	// is reserved for the recipient's address: setting it rejects the
+	// recipient with RejectionReasonReservedField.
 	Fields map[string]string
 	// Tracking is the consent this recipient has given, as held in your own
 	// CRM.
