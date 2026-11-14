@@ -1,9 +1,5 @@
 package kannon
 
-import (
-	trackingtypes "github.com/kannon-email/kannon.go/internal/proto/kannon/tracking/types"
-)
-
 // TrackingMode states how much of one engagement channel may be observed.
 //
 // The scale is ordered by increasing collection: TrackingModeOff collects
@@ -51,27 +47,11 @@ type TrackingPolicy struct {
 	Links TrackingMode
 }
 
-var trackingModes = map[TrackingMode]trackingtypes.TrackingMode{
-	TrackingModeOff:          trackingtypes.TrackingMode_TRACKING_MODE_OFF,
-	TrackingModeAnonymous:    trackingtypes.TrackingMode_TRACKING_MODE_ANONYMOUS,
-	TrackingModePseudonymous: trackingtypes.TrackingMode_TRACKING_MODE_PSEUDONYMOUS,
-	TrackingModeIdentified:   trackingtypes.TrackingMode_TRACKING_MODE_IDENTIFIED,
-	TrackingModeFull:         trackingtypes.TrackingMode_TRACKING_MODE_FULL,
-}
-
-func (m TrackingMode) toProto() trackingtypes.TrackingMode {
-	return trackingModes[m] // absent (including "") maps to UNSPECIFIED
-}
-
-// toProto maps a policy to its proto message. A nil policy states nothing and
-// leaves the proto field absent; a non-nil policy is always sent, with each
-// empty axis as UNSPECIFIED.
-func (p *TrackingPolicy) toProto() *trackingtypes.TrackingPolicy {
+// toWire maps a policy to its wire form. A nil policy states nothing and
+// leaves the field absent; an empty axis is omitted.
+func (p *TrackingPolicy) toWire() *wireTracking {
 	if p == nil {
 		return nil
 	}
-	return &trackingtypes.TrackingPolicy{
-		Opens: p.Opens.toProto(),
-		Links: p.Links.toProto(),
-	}
+	return &wireTracking{Opens: p.Opens, Links: p.Links}
 }

@@ -36,15 +36,3 @@ jobs:
           go-version: stable
       - uses: golangci/golangci-lint-action@v9
 
-  buf:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: bufbuild/buf-action@v1
-        with:
-          lint: true
-          format: false
-          breaking: ${{ github.event_name == 'pull_request' }}
-          push: false
-          archive: false
-          pr_comment: false

@@ -57,8 +57,8 @@ type SendParams struct {
 // SendResult is the result returned after sending an email through
 // MailSender.
 type SendResult struct {
-	// MessageID is the unique identifier of the sent message.
-	MessageID string
+	// BatchID identifies the created Batch.
+	BatchID string
 	// AcceptedCount is how many recipients were accepted and are queued for
 	// delivery.
 	AcceptedCount int
@@ -106,7 +106,7 @@ func (m *MailSender) Send(ctx context.Context, params SendParams) (SendResult, e
 	}
 
 	return SendResult{
-		MessageID:          result.MessageID,
+		BatchID:            result.BatchID,
 		AcceptedCount:      result.AcceptedCount,
 		RejectedCount:      result.RejectedCount,
 		RejectedRecipients: result.RejectedRecipients,

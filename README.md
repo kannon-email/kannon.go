@@ -12,12 +12,19 @@ k := kannon.NewKannon(
   "<YOUR DOMAIN>",
   "<API KEY>",
   sender,
-  "<YOU KANNON API HOST>",
 )
 ```
 
-> [!NOTE]
-> Remember to add `https://` to the API host (e.g. `https://grpc.kannon.email:443`)!
+The client talks to the Kannon REST API v1 with only the Go standard library. It
+targets the hosted API at `https://api.kannon.email/v1` by default; point it at
+your own installation, or bring your own `*http.Client`, with client options:
+
+```go
+k := kannon.NewKannon(domain, key, sender,
+  kannon.WithBaseURL("https://kannon.example.com/v1"),
+  kannon.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
+)
+```
 ### Basic Usage
 
 ```go
@@ -83,6 +90,8 @@ res, err := k.SendEmail(
     CC: []string{"manager@example.com"},
   }),
   kannon.WithScheduledTime(time.Now().Add(24*time.Hour)),
+  kannon.WithReplyTo("support@example.com", "Support"),
+  kannon.WithIdempotencyKey(orderID),
 )
 ```
 
@@ -90,6 +99,10 @@ res, err := k.SendEmail(
 - `WithGlobalFields` sets template fields shared by every recipient; a recipient's own fields win on conflicts.
 - `WithHeaders` customizes the To and Cc headers. Addresses listed here are display only: they do not receive the email unless they are also recipients.
 - `WithScheduledTime` schedules the batch for future delivery. When omitted, the server sends immediately.
+- `WithReplyTo` emits a `Reply-To` header, so replies go somewhere other than the sender.
+- `WithIdempotencyKey` makes the send safe to retry: the server creates at most one batch per key for at least 24 hours, and answers a repeat with the original receipt (`res.Replayed` is true, `RejectedRecipients` is empty). Without it every call uses a fresh key, so retrying a call that timed out may send twice.
+
+Recipient `Fields` personalise the subject and content. `email` is reserved for the recipient's address: setting it rejects that recipient with reason `reserved_field`.
 
 ### Tracking Policy
 
@@ -168,7 +181,7 @@ There is no domain-wide default and no per-recipient override: an unsubscribe he
 
 ### Intake Results
 
-A recipient refused at intake does not fail the send: it is reported back on `MessageResult` so you can reconcile what was actually queued.
+A recipient refused at intake does not fail the send: it is reported back on `MessageResult`, with its index in your list, so you can reconcile what was actually queued.
 
 ```go
 res, err := k.SendEmail(ctx, recipents, "Newsletter", html)
@@ -186,11 +199,28 @@ for _, r := range res.RejectedRecipients {
 | Reason | Meaning |
 |--------|---------|
 | `invalid_email` | The address is empty or otherwise unusable |
+| `duplicate_recipient` | The address already appears earlier in the batch |
 | `tracking_above_ceiling` | The recipient's policy asks for more than its domain allows |
 | `unsupported_tracking_mode` | The recipient stated a mode the server will not act on |
 | `unsubscribe_url_unresolved` | A placeholder in the unsubscribe URL template was left unresolved |
+| `unresolved_placeholder` | A placeholder in the subject or content was left unresolved |
+| `reserved_field` | The recipient's fields override a reserved field, such as `email` |
+| `message_too_large` | The personalised message exceeds the size the server accepts |
 
 Treat an unrecognised value as a refusal of unknown cause: the set grows as new causes are added.
+
+### Errors
+
+A refused request returns an `*kannon.APIError` carrying the HTTP status, the stable problem `Code`, the server's `RequestID`, the offending `Errors` and any `RetryAfter` hint. When **every** recipient is refused no batch is created and the call fails with code `no_recipients_accepted`; each entry of `Errors` then names one recipient by pointer (`/recipients/<index>/...`) with its rejection reason as code.
+
+```go
+var apiErr *kannon.APIError
+if errors.As(err, &apiErr) && apiErr.Code == kannon.CodeNoRecipientsAccepted {
+  for _, e := range apiErr.Errors {
+    log.Printf("%s: %s", e.Pointer, e.Code)
+  }
+}
+```
 
 ### MailSender - Simple Email API
 
@@ -214,4 +244,4 @@ res, err := mailSender.Send(context.Background(), kannon.SendParams{
 - CC recipients are visible in the email headers to all recipients; BCC recipients receive the email but never appear in the headers.
 - Set `ScheduledTime` (a `*time.Time`) to schedule for future delivery.
 - Mail sent through `MailSender` is **never tracked**: opens and links are both forced to `off`, and no `List-Unsubscribe` header is emitted. A plain mail client sends mail, it does not measure it. Use the Kannon client directly for campaign mail, where those are decisions to make.
-- The returned `SendResult` carries `MessageID`, `ScheduledTime` and the intake counts (`AcceptedCount`, `RejectedCount`, `RejectedRecipients`).
+- The returned `SendResult` carries `BatchID`, `ScheduledTime` and the intake counts (`AcceptedCount`, `RejectedCount`, `RejectedRecipients`).

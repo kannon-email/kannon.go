@@ -34,8 +34,8 @@ type OneClickUnsubscribe struct {
 	// unsubscribe the recipient with no further confirmation.
 	//
 	// `{{ field }}` placeholders are substituted per delivery from the
-	// recipient's fields, plus `email`, which Kannon supplies as the
-	// recipient's address unless you pass a field of that name yourself.
+	// recipient's fields, plus `email`, which Kannon always supplies as the
+	// recipient's address.
 	// Substituted values are percent-encoded, so pass raw values rather than
 	// pre-encoded ones.
 	//
@@ -55,6 +55,8 @@ type sendOptions struct {
 	oneClickUnsubscribe *OneClickUnsubscribe
 	scheduledTime       *time.Time
 	tracking            *TrackingPolicy
+	replyTo             *wireMailbox
+	idempotencyKey      string
 }
 
 func applySendOptions(opts []SendOption) sendOptions {
@@ -111,5 +113,26 @@ func WithTracking(policy TrackingPolicy) SendOption {
 func WithOneClickUnsubscribe(urlTemplate string) SendOption {
 	return func(o *sendOptions) {
 		o.oneClickUnsubscribe = &OneClickUnsubscribe{URLTemplate: urlTemplate}
+	}
+}
+
+// WithReplyTo emits a Reply-To header, so replies go to email instead of the
+// sender. name is the optional display name.
+func WithReplyTo(email, name string) SendOption {
+	return func(o *sendOptions) {
+		o.replyTo = &wireMailbox{Email: email, Name: name}
+	}
+}
+
+// WithIdempotencyKey sets the key that makes the send safe to retry: the
+// server creates at most one Batch per key and Domain for at least 24 hours,
+// and answers a repeated send with the original receipt (MessageResult.Replayed).
+// Reusing a key with different content fails with CodeIdempotencyConflict.
+//
+// When omitted, every call generates a fresh key, so a retried call may
+// send twice.
+func WithIdempotencyKey(key string) SendOption {
+	return func(o *sendOptions) {
+		o.idempotencyKey = key
 	}
 }

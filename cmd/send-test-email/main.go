@@ -8,7 +8,7 @@
 //	KANNON_KEY       API key for the domain (required)
 //	KANNON_EMAIL     sender email address (required)
 //	KANNON_TO        comma-separated recipient addresses (required)
-//	KANNON_ENDPOINT  API endpoint (default https://grpc.kannon.email)
+//	KANNON_ENDPOINT  REST API base URL (default kannon.DefaultBaseURL)
 package main
 
 import (
@@ -21,8 +21,6 @@ import (
 	kannon "github.com/kannon-email/kannon.go"
 )
 
-const defaultEndpoint = "https://grpc.kannon.email"
-
 func main() {
 	domain := requireEnv("KANNON_DOMAIN")
 	key := requireEnv("KANNON_KEY")
@@ -31,7 +29,7 @@ func main() {
 
 	endpoint := os.Getenv("KANNON_ENDPOINT")
 	if endpoint == "" {
-		endpoint = defaultEndpoint
+		endpoint = kannon.DefaultBaseURL
 	}
 
 	if len(to) == 0 {
@@ -45,7 +43,7 @@ func main() {
 	fmt.Println("To:", strings.Join(to, ", "))
 
 	sender := kannon.Sender{Alias: "Kannon Test", Email: email}
-	client := kannon.NewKannon(domain, key, sender, endpoint)
+	client := kannon.NewKannon(domain, key, sender, kannon.WithBaseURL(endpoint))
 
 	recipients := make([]kannon.Recipient, 0, len(to))
 	for _, addr := range to {
@@ -70,7 +68,7 @@ func main() {
 	}
 
 	fmt.Println("Email sent successfully!")
-	fmt.Println("Message ID:", result.MessageID)
+	fmt.Println("Batch ID:", result.BatchID)
 	fmt.Println("Accepted:", result.AcceptedCount)
 
 	if result.RejectedCount > 0 {

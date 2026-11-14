@@ -26,8 +26,7 @@ func (f *fakeHTMLSender) SendEmail(_ context.Context, to []Recipient, subject, b
 
 func defaultResult() MessageResult {
 	return MessageResult{
-		MessageID:          "test-id",
-		TemplateID:         "",
+		BatchID:            "test-id",
 		ScheduledTime:      time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		AcceptedCount:      1,
 		RejectedCount:      0,
@@ -273,13 +272,13 @@ func TestMailSenderResultMapping(t *testing.T) {
 	}
 
 	want := SendResult{
-		MessageID:          "test-id",
+		BatchID:            "test-id",
 		AcceptedCount:      1,
 		RejectedCount:      0,
 		RejectedRecipients: []RejectedRecipient{},
 		ScheduledTime:      time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
-	if result.MessageID != want.MessageID ||
+	if result.BatchID != want.BatchID ||
 		result.AcceptedCount != want.AcceptedCount ||
 		result.RejectedCount != want.RejectedCount ||
 		len(result.RejectedRecipients) != 0 ||
@@ -294,7 +293,7 @@ func TestMailSenderReportsRejectedRecipients(t *testing.T) {
 		{Email: "opted-out@example.com", Reason: RejectionReasonTrackingAboveCeiling},
 	}
 	client := &fakeHTMLSender{result: MessageResult{
-		MessageID:          "test-id",
+		BatchID:            "test-id",
 		ScheduledTime:      time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		AcceptedCount:      1,
 		RejectedCount:      2,
